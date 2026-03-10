@@ -5,16 +5,19 @@ __pycache__/
 # Virtual Environment
 venv/
 env/
+peppo/
 
 # Environment Variables
 .env
 
 # Data
-*.csv
-*.xlsx
-*.bin
-*.log
+# *.csv
+# *.xlsx
+# *.bin
+# *.log
 
 # IDE
 .vscode/
 .idea/
+
+gcp-key.json
