@@ -1,6 +1,9 @@
 boto3
-azure-storage-blob
+# azure-storage-blob
 google-cloud-storage
 python-dotenv
 pandas
-streamlit
+# streamlit
+
+# New dependencies for GCP support and enhanced dashboard
+plotly

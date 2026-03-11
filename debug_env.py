@@ -24,4 +24,24 @@ else:
     if old_name:
         print("   ⚠️  Found 'AZURE_CONNECTION_STRING' instead. Please rename it to 'AZURE_STORAGE_CONNECTION_STRING' in your .env file.")
 
+# 3. Check GCP
+gcp_project = os.getenv('GCP_PROJECT_ID')
+gcp_bucket = os.getenv('GCP_BUCKET_NAME')
+gcp_key = os.getenv('GCP_KEY_PATH', str(os.path.join(os.path.dirname(__file__), "gcp-key.json")))
+
+if gcp_project:
+    print(f"✅ GCP Project ID Found: {gcp_project}")
+else:
+    print("❌ GCP_PROJECT_ID NOT FOUND. Check spelling in .env")
+
+if gcp_bucket:
+    print(f"✅ GCP Bucket Name Found: {gcp_bucket}")
+else:
+    print("❌ GCP_BUCKET_NAME NOT FOUND. Check spelling in .env")
+
+if os.path.exists(gcp_key):
+    print(f"✅ GCP Service Account Key Found at: {gcp_key}")
+else:
+    print(f"❌ GCP Service Account Key NOT found at: {gcp_key}")
+
 print("---------------------------------------")
