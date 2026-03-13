@@ -11,10 +11,12 @@ peppo/
 .env
 
 # Data
-# *.csv
-# *.xlsx
-# *.bin
-# *.log
+data/
+*.csv
+*.xlsx
+*.bin
+*.log
+benchmark_report_*.txt
 
 # IDE
 .vscode/

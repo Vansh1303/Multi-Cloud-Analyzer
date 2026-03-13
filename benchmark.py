@@ -10,6 +10,7 @@ Usage:
 import os
 import sys
 import pandas as pd
+import requests
 from datetime import datetime
 from dotenv import load_dotenv
 from providers import PROVIDER_REGISTRY, check_provider_env, load_provider
@@ -23,6 +24,35 @@ CSV_FILE = "benchmark_results.csv"
 
 # All benchmark operations in execution order
 OPERATIONS = ["Upload", "Download", "Metadata", "List", "Delete"]
+
+DATASET_URL = "https://data.wa.gov/api/views/f6w7-q2d2/rows.csv?accessType=DOWNLOAD"
+DATA_DIR = "data"
+DATASET_FILE = os.path.join(DATA_DIR, "dataset.csv")
+
+
+def get_real_dataset():
+    """Download the dataset from Data.gov if it doesn't exist."""
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR)
+    
+    if not os.path.exists(DATASET_FILE):
+        print(f"  Downloading real dataset (Open Government Data) ...")
+        try:
+            response = requests.get(DATASET_URL, timeout=30)
+            response.raise_for_status()
+            with open(DATASET_FILE, "wb") as f:
+                f.write(response.content)
+            print(f"  Dataset saved to {DATASET_FILE} ({len(response.content)/1024/1024:.2f} MB)")
+        except Exception as e:
+            print(f"  [Error] Failed to download dataset: {e}")
+            print(f"  Falling back to generated test file.")
+            # Create a fallback file if download fails
+            with open(DATASET_FILE, "wb") as f:
+                f.write(os.urandom(5 * 1024 * 1024))
+    else:
+        print(f"  Using existing dataset: {DATASET_FILE}")
+    
+    return DATASET_FILE
 
 
 def generate_test_file(filename, size_mb):
@@ -88,9 +118,10 @@ def run_benchmark(clouds):
         print("No cloud providers available. Check your .env file.")
         return
 
-    test_file = "benchmark_test.bin"
+    test_file = get_real_dataset()
     download_file = "downloaded_test.bin"
-    generate_test_file(test_file, FILE_SIZE_MB)
+    file_size_bytes = os.path.getsize(test_file)
+    file_size_mb = file_size_bytes / (1024 * 1024)
 
     results = []
     uploaded_urls = {}   # provider -> latest URL
@@ -112,10 +143,10 @@ def run_benchmark(clouds):
             print(f"  [{provider}] Upload ...", end="", flush=True)
             up = client.upload_file(test_file, bucket, test_file)
             if up.elapsed > 0:
-                speed = FILE_SIZE_MB / up.elapsed
+                speed = file_size_mb / up.elapsed
                 uploaded_urls[provider] = up.url
                 print(f" {up.elapsed:.2f}s | {speed:.2f} MB/s | {up.url}")
-                results.append(_row(provider, "Upload", up.elapsed, speed, round_num, up.url))
+                results.append(_row(provider, "Upload", up.elapsed, speed, round_num, up.url, file_size_mb))
             else:
                 print(" FAILED")
 
@@ -123,9 +154,9 @@ def run_benchmark(clouds):
             print(f"  [{provider}] Download ...", end="", flush=True)
             dl = client.download_file(bucket, test_file, download_file)
             if dl.elapsed > 0:
-                speed = FILE_SIZE_MB / dl.elapsed
+                speed = file_size_mb / dl.elapsed
                 print(f" {dl.elapsed:.2f}s | {speed:.2f} MB/s")
-                results.append(_row(provider, "Download", dl.elapsed, speed, round_num))
+                results.append(_row(provider, "Download", dl.elapsed, speed, round_num, size_mb=file_size_mb))
             else:
                 print(" FAILED")
 
@@ -161,9 +192,25 @@ def run_benchmark(clouds):
             if os.path.exists(download_file):
                 os.remove(download_file)
 
-    # cleanup local test file
-    if os.path.exists(test_file):
-        os.remove(test_file)
+    # Note: We keep the dataset file in the data/ directory instead of deleting it
+
+    # ── Portability Test ──
+    portability_data = []
+    if len(clouds) >= 2:
+        print("\n" + "=" * 55)
+        print("  PORTABILITY TEST (Cross-Cloud Transfer)")
+        print("=" * 55)
+        names = list(clouds.keys())
+        # Test between all unique pairs
+        for i in range(len(names)):
+            for j in range(len(names)):
+                if i == j:
+                    continue
+                res = run_portability_test(clouds, names[i], names[j])
+                if res:
+                    portability_data.append(res)
+                    # Log to results for CSV
+                    results.append(_row(f"{names[i]}->{names[j]}", "Portability", res["total"], None, 1, size_mb=res.get("size_mb")))
 
     # ── Save CSV ──
     df = pd.DataFrame(results)
@@ -195,17 +242,66 @@ def run_benchmark(clouds):
     print(f"\n  Report saved to: {report_file}")
 
 
-def _row(provider, operation, elapsed, speed, round_num, url=None):
+def _row(provider, operation, elapsed, speed, round_num, url=None, size_mb=None):
     return {
         "Provider": provider,
         "Operation": operation,
         "Time_Seconds": elapsed,
         "Speed_MBps": speed,
-        "Size_MB": FILE_SIZE_MB if operation in ("Upload", "Download") else None,
+        "Size_MB": size_mb,
         "Round": round_num,
         "URL": url,
         "Timestamp": datetime.now(),
     }
+
+
+def run_portability_test(clouds, source_name, dest_name):
+    """Download from source and upload to destination."""
+    print(f"\n  [Portability] {source_name} -> {dest_name}")
+    test_file = DATASET_FILE
+    dl_file = f"port_dl_{source_name}.bin"
+    
+    file_path = get_real_dataset()
+    file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
+    
+    source_client, source_bucket = clouds[source_name]
+    dest_client, dest_bucket = clouds[dest_name]
+
+    try:
+        # 1. Upload to Source
+        source_client.upload_file(file_path, source_bucket, "port_test.csv")
+        
+        # 2. Download from Source
+        print(f"    Step 1: Download from {source_name} ...", end="", flush=True)
+        dl = source_client.download_file(source_bucket, "port_test.csv", dl_file)
+        if dl.elapsed <= 0: raise Exception("Download failed")
+        print(f" {dl.elapsed:.2f}s")
+
+        # 3. Upload to Destination
+        print(f"    Step 2: Upload to {dest_name}   ...", end="", flush=True)
+        up = dest_client.upload_file(dl_file, dest_bucket, "port_test.csv")
+        if up.elapsed <= 0: raise Exception("Upload failed")
+        print(f" {up.elapsed:.2f}s")
+
+        total = dl.elapsed + up.elapsed
+        print(f"    Total Transfer Time: {total:.2f}s")
+        
+        # Cleanup
+        source_client.delete_file(source_bucket, "port_test.csv")
+        dest_client.delete_file(dest_bucket, "port_test.csv")
+        if os.path.exists(dl_file): os.remove(dl_file)
+            
+        return {
+            "source": source_name,
+            "dest": dest_name,
+            "dl_time": dl.elapsed,
+            "up_time": up.elapsed,
+            "total": total,
+            "size_mb": file_size_mb
+        }
+    except Exception as e:
+        print(f"    FAILED: {e}")
+        return None
 
 
 # ──────────────────────────────────────────────
@@ -215,6 +311,8 @@ def _row(provider, operation, elapsed, speed, round_num, url=None):
 def generate_report(df, uploaded_urls=None):
     report_time = datetime.now().strftime("%Y%m%d_%H%M%S")
     report_file = f"benchmark_report_{report_time}.txt"
+
+    portability_df = df[df["Operation"] == "Portability"]
 
     pricing = {
         "AWS":   {"storage_per_gb": 0.025, "egress_per_gb": 0.09,  "free_egress_gb": 100},
@@ -228,7 +326,10 @@ def generate_report(df, uploaded_urls=None):
     lines.append("      MULTI-CLOUD STORAGE PERFORMANCE & LOCK-IN ANALYSIS REPORT")
     lines.append("=" * w)
     lines.append(f"  Generated  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    lines.append(f"  File Size  : {FILE_SIZE_MB} MB")
+    # Get size from CSV if available or use default
+    current_size = df[df["Size_MB"].notna()]["Size_MB"].iloc[-1] if not df.empty else 0
+    lines.append(f"  File Source: Open Government Data (Electric Vehicle Population)")
+    lines.append(f"  File Size  : {current_size:.2f} MB")
     lines.append(f"  Rounds     : {TEST_ROUNDS}")
     lines.append(f"  Providers  : {', '.join(df['Provider'].unique())}")
     lines.append(f"  Operations : {', '.join(OPERATIONS)}")
@@ -293,20 +394,31 @@ def generate_report(df, uploaded_urls=None):
             best = avg_lat["Delete"].idxmin()
             lines.append(f"  Fastest Delete   : {best} ({avg_lat.loc[best, 'Delete'] * 1000:.1f} ms)")
 
-    # 4. UPLOADED FILE URLs
+    # 4. PORTABILITY
+    if not portability_df.empty:
+        lines.append("\n4. PORTABILITY BENCHMARK (Cross-Cloud Transfer)")
+        lines.append("-" * w)
+        lines.append(f"  {'Route':<25} {'Total Time (s)':<15}")
+        lines.append("  " + "-" * 40)
+        for _, row in portability_df.iterrows():
+            lines.append(f"  {row['Provider']:<25} {row['Time_Seconds']:<15.2f}")
+
+    # 5. UPLOADED FILE URLs
     if uploaded_urls:
         lines.append("\n4. UPLOADED FILE URLs (last round)")
         lines.append("-" * w)
         for prov, url in uploaded_urls.items():
             lines.append(f"  {prov:<10}: {url}")
 
-    # 5. COST ESTIMATION
-    lines.append("\n5. ESTIMATED MONTHLY COST (1 TB Storage + 1 TB Egress)")
+    # 6. COST ESTIMATION
+    lines.append("\n6. ESTIMATED MONTHLY COST (1 TB Storage + 1 TB Egress)")
     lines.append("-" * w)
     lines.append(f"  {'Provider':<10} {'Storage($)':<14} {'Egress($)':<14} {'Total($)':<14} {'Free Egress(GB)':<16}")
     lines.append("  " + "-" * 66)
     cost_rows = []
-    for provider in df["Provider"].unique():
+    # Use only "pure" providers for cost (filter out Route strings)
+    base_providers = [p for p in df["Provider"].unique() if "->" not in p]
+    for provider in base_providers:
         p = pricing.get(provider, {"storage_per_gb": 0, "egress_per_gb": 0, "free_egress_gb": 0})
         s_cost = 1000 * p["storage_per_gb"]
         e_cost = 1000 * p["egress_per_gb"]
@@ -317,22 +429,22 @@ def generate_report(df, uploaded_urls=None):
         cheapest = min(cost_rows, key=lambda x: x[3])
         lines.append(f"\n  Cheapest overall : {cheapest[0]} (${cheapest[3]:.2f}/mo)")
 
-    # 6. LOCK-IN RISK
-    lines.append("\n6. VENDOR LOCK-IN RISK ASSESSMENT")
+    # 7. LOCK-IN RISK
+    lines.append("\n7. VENDOR LOCK-IN RISK ASSESSMENT")
     lines.append("-" * w)
     lock_in_notes = {
         "AWS":   "Moderate - S3 API is the de facto standard; many tools are S3-compatible.",
         "Azure": "Moderate - Blob Storage SDK is Azure-specific, but migration tools exist.",
         "GCP":   "Moderate - GCS offers S3-compatible XML API; highest egress pricing of the three.",
     }
-    for provider in df["Provider"].unique():
+    for provider in base_providers:
         lines.append(f"  {provider:<10}: {lock_in_notes.get(provider, 'N/A')}")
     if not speed_df.empty and "Download" in avg_speeds.columns:
         slowest = avg_speeds["Download"].idxmin()
         lines.append(f"\n  Highest lock-in risk: {slowest} (slowest egress + high egress pricing).")
 
-    # 7. RECOMMENDATIONS
-    lines.append("\n7. RECOMMENDATIONS")
+    # 8. RECOMMENDATIONS
+    lines.append("\n8. RECOMMENDATIONS")
     lines.append("-" * w)
     if not speed_df.empty and "Upload" in avg_speeds.columns and "Download" in avg_speeds.columns:
         bu = avg_speeds["Upload"].idxmax()

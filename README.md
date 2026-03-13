@@ -154,6 +154,10 @@ The generated `benchmark_report_<timestamp>.txt` includes:
 6. **Vendor Lock-In Risk** — Qualitative analysis per provider
 7. **Recommendations** — Data-driven suggestions
 
+## API & Authentication Challenges
+
+For a detailed analysis of the technical differences, authentication hurdles, and terminology variations between AWS, Azure, and GCP, see **[CHALLENGES.md](CHALLENGES.md)**.
+
 ## Quick Start (GCP Only)
 
 ```bash
