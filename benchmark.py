@@ -119,6 +119,7 @@ def run_benchmark(clouds):
         return
 
     test_file = get_real_dataset()
+    test_file = test_file.replace('\\', '/')
     download_file = "downloaded_test.bin"
     file_size_bytes = os.path.getsize(test_file)
     file_size_mb = file_size_bytes / (1024 * 1024)
