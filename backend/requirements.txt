@@ -1,0 +1,22 @@
+# ─────────────────────────────────────────────
+# Multi-Cloud Analyzer — FastAPI Backend
+# ─────────────────────────────────────────────
+
+# Core API framework
+fastapi
+uvicorn[standard]
+
+# Firebase Admin SDK (JWT verification)
+firebase-admin
+
+# Data handling
+pandas
+python-dotenv
+
+# Cloud provider SDKs
+boto3
+azure-storage-blob
+google-cloud-storage
+
+# Utilities
+requests

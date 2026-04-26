@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+venv/
+*.pyc
+
+# Environment & Secrets
+.env
+firebase-admin-key.json
+
+# Local Data
+benchmark_results.csv
