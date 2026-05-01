@@ -20,6 +20,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import firebase_admin
 from firebase_admin import auth, credentials
 
+import sys
+
 # ─────────────────────────────────────────────
 # ENV & PATHS
 # ─────────────────────────────────────────────
@@ -280,11 +282,6 @@ async def get_telemetry():
 async def run_benchmark(request: Request):
     """
     Triggers a benchmark run. Protected by Firebase JWT.
-
-    Flow:
-    1. Extract & verify the Firebase Bearer token
-    2. Execute the benchmark engine (Docker subprocess)
-    3. Return the run status
     """
     # Step 1: Verify Firebase JWT
     decoded_token = _verify_firebase_token(request)
@@ -293,11 +290,12 @@ async def run_benchmark(request: Request):
 
     # Step 2: Trigger the benchmark engine
     try:
+        # sys.executable forces it to use your active (venv) Python
         result = subprocess.run(
-            ["python", "benchmark.py", "aws,azure,gcp"],
+            [sys.executable, "benchmark.py", "aws,azure,gcp"], 
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=600,
             cwd=str(BASE_DIR),
         )
         if result.returncode == 0:
@@ -308,6 +306,7 @@ async def run_benchmark(request: Request):
                 "output": result.stdout
             }
         else:
+            print(f"SCRIPT CRASHED: {result.stderr}") # Prints to your terminal
             raise HTTPException(
                 status_code=500,
                 detail=f"Benchmark failed: {result.stderr}"
@@ -315,14 +314,14 @@ async def run_benchmark(request: Request):
     except subprocess.TimeoutExpired:
         raise HTTPException(
             status_code=504,
-            detail="Benchmark timed out after 300 seconds."
+            detail="Benchmark timed out after 600 seconds."
         )
     except Exception as e:
+        print(f"SYSTEM ERROR: {str(e)}") # Prints to your terminal
         raise HTTPException(
             status_code=500,
             detail=f"Failed to execute benchmark: {str(e)}"
         )
-
 
 # ─────────────────────────────────────────────
 # ENTRYPOINT (for direct execution)

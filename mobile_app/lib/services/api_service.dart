@@ -3,7 +3,7 @@ import 'package:http/http.dart' as http;
 
 class ApiService {
   // Use 10.0.2.2 for Android Emulator, localhost for iOS simulator/desktop
-  static const String baseUrl = 'http://127.0.0.1:8000/api';
+  static const String baseUrl = 'http://13.206.95.24:8000';
 
   Future<Map<String, dynamic>> fetchTelemetry() async {
     try {
